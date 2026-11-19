@@ -15,7 +15,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
 class JarvisViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = JarvisDatabase.getDatabase(application)
@@ -83,5 +87,48 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         super.onCleared()
         voiceManager.shutdown()
+   fun askGemini(userPrompt: String, onResult: (String) -> Unit) {
+    val apiKey = "" // <--
+    val url = URL("https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$apiKey")
+
+    kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+        try {
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.doOutput = true
+
+            val jsonInputString = """
+                {
+                  "contents": [{
+                    "parts":[{"text": "You are JARVIS, a helpful AI assistant. Reply concisely. User: $userPrompt"}]
+                  }]
+                }
+            """.trimIndent()
+
+            connection.outputStream.use { os ->
+                val input: ByteArray = jsonInputString.toByteArray(charset("utf-8"))
+                os.write(input, 0, input.size)
+            }
+
+            if (connection.responseCode == 200) {
+                val response = connection.inputStream.bufferedReader().readText()
+                val jsonObject = JSONObject(response)
+                val aiReply = jsonObject.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+                
+                withContext(Dispatchers.Main) {
+                    onResult(aiReply)
+                }
+            } else {
+                withContext(Dispatchers.Main) {
+                    onResult("Error: API call failed with code ${connection.responseCode}")
+                }
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                onResult("Error: ${e.message}")
+            }
+        }
     }
+} }
 }
