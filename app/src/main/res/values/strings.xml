@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">JARVIS AI</string>
+    <string name="jarvis_ready">JARVIS 5.0 Online. All systems nominal, Sir.</string>
+    <string name="tap_to_speak">Tap to speak or type command…</string>
+</resources>
