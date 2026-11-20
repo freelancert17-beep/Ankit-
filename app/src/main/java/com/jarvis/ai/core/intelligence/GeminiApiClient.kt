@@ -13,7 +13,7 @@ import java.net.URL
 class GeminiApiClient {
 
     // Supported models in fallback order
-    private val models = listOf("gemini-1.5-flash", "gemini-2.5-flash", "gemini-pro")
+    private val models = listOf("gemini-1.5-flash", "gemini-2.5-flash", )
 
     suspend fun generateAnswer(apiKey: String, prompt: String, chatHistory: List<Pair<String, String>> = emptyList()): String {
         return withContext(Dispatchers.IO) {
