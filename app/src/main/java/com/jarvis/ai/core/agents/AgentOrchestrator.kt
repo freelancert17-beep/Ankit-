@@ -43,7 +43,7 @@ class AgentOrchestrator(context: Context) {
         return AgentExecutionResult(
             agentType = AgentType.MAIN_JARVIS,
             success = true,
-            planSummary = "Live Gemini AI Neural Reasoning",
+            planSummary = "JARVIS Neural Engine",
             outputText = aiResponse
         )
     }
