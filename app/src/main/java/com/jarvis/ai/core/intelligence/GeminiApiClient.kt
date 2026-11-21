@@ -4,8 +4,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
@@ -34,7 +32,11 @@ class GeminiApiClient {
     suspend fun generateAnswer(
         apiKey: String,
         prompt: String,
-        chatHistory: List<Pair<String, String>> = emptyList()
+        chatHistory: List<Pair<String, String>> = emptyList(),
+        imageBase64: String? = null,
+        imageMimeType: String? = null,
+        memoryContext: String = "",
+        liveSearchContext: String = ""
     ): String {
         return withContext(Dispatchers.IO) {
             val key = apiKey.trim()
@@ -42,10 +44,19 @@ class GeminiApiClient {
                 return@withContext "Boss, Gemini API key configure nahi hai. Kripya Settings icon (🔑) par click karke apni API key enter karein."
             }
 
+            // Build enriched context
+            val enrichedPrompt = buildString {
+                if (liveSearchContext.isNotBlank()) {
+                    append(liveSearchContext)
+                    append("\n\n")
+                }
+                append(prompt)
+            }
+
             // 1. Try cached working model if already known
             val currentCachedModel = cachedWorkingModel
             if (!currentCachedModel.isNullOrBlank()) {
-                val cachedResult = executeRequest(key, cachedApiVersion, currentCachedModel, prompt, chatHistory)
+                val cachedResult = executeRequest(key, cachedApiVersion, currentCachedModel, enrichedPrompt, chatHistory, imageBase64, imageMimeType, memoryContext)
                 if (cachedResult != null) {
                     return@withContext cachedResult
                 }
@@ -54,7 +65,7 @@ class GeminiApiClient {
             // 2. Discover available models dynamically via Google ModelService.ListModels
             val discoveredList = queryAvailableModels(key)
             for ((version, modelName) in discoveredList) {
-                val result = executeRequest(key, version, modelName, prompt, chatHistory)
+                val result = executeRequest(key, version, modelName, enrichedPrompt, chatHistory, imageBase64, imageMimeType, memoryContext)
                 if (result != null) {
                     cachedWorkingModel = modelName
                     cachedApiVersion = version
@@ -63,10 +74,9 @@ class GeminiApiClient {
             }
 
             // 3. Fallback: try static matrix across versions and model identifiers
-            var lastError = "Unable to connect with Gemini servers."
             for (version in apiVersions) {
                 for (model in staticCandidateModels) {
-                    val result = executeRequest(key, version, model, prompt, chatHistory)
+                    val result = executeRequest(key, version, model, enrichedPrompt, chatHistory, imageBase64, imageMimeType, memoryContext)
                     if (result != null) {
                         cachedWorkingModel = model
                         cachedApiVersion = version
@@ -75,7 +85,7 @@ class GeminiApiClient {
                 }
             }
 
-            return@withContext "Yes Boss, AI server se response prapt nahi hua. Kripya internet ya Top bar (🔑) mein Gemini API key check karein."
+            return@withContext "Yes Boss, AI server se response prapt nahi hua. Kripya internet connection ya Top bar (🔑) mein Gemini API key check karein."
         }
     }
 
@@ -117,7 +127,7 @@ class GeminiApiClient {
                             }
                         }
 
-                        // Sort flash models to the top for lowest latency
+                        // Prefer flash models for lower latency
                         val sorted = names.sortedWith(compareByDescending<String> {
                             when {
                                 it.contains("2.5-flash") -> 100
@@ -148,16 +158,19 @@ class GeminiApiClient {
         version: String,
         modelName: String,
         prompt: String,
-        chatHistory: List<Pair<String, String>>
+        chatHistory: List<Pair<String, String>>,
+        imageBase64: String?,
+        imageMimeType: String?,
+        memoryContext: String
     ): String? {
         val cleanModel = if (modelName.startsWith("models/")) modelName.removePrefix("models/") else modelName
         val endpoint = "https://generativelanguage.googleapis.com/$version/models/$cleanModel:generateContent?key=$apiKey"
 
         // First attempt with systemInstruction
-        var result = sendHttpPost(endpoint, apiKey, prompt, chatHistory, includeSystemInstruction = true)
+        var result = sendHttpPost(endpoint, apiKey, prompt, chatHistory, includeSystemInstruction = true, imageBase64, imageMimeType, memoryContext)
         if (result == null) {
-            // Second attempt: without systemInstruction (embed instruction in prompt for older model compatibility)
-            result = sendHttpPost(endpoint, apiKey, prompt, chatHistory, includeSystemInstruction = false)
+            // Second attempt: embed instruction in user prompt
+            result = sendHttpPost(endpoint, apiKey, prompt, chatHistory, includeSystemInstruction = false, imageBase64, imageMimeType, memoryContext)
         }
         return result
     }
@@ -167,7 +180,10 @@ class GeminiApiClient {
         apiKey: String,
         prompt: String,
         chatHistory: List<Pair<String, String>>,
-        includeSystemInstruction: Boolean
+        includeSystemInstruction: Boolean,
+        imageBase64: String?,
+        imageMimeType: String?,
+        memoryContext: String
     ): String? {
         try {
             val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
@@ -182,7 +198,12 @@ class GeminiApiClient {
 
             val payload = JSONObject()
 
-            val bossSystemText = "You are JARVIS, an advanced autonomous personal AI assistant. Always address the user as 'Boss'. Respond in natural, polite Hindi, English, or Hinglish. Keep answers concise, intelligent, and conversational so they sound natural when spoken aloud."
+            val baseInstruction = "You are JARVIS, Tony Stark's ultra-advanced autonomous personal AI assistant. Always address the user as 'Boss'. Respond in polite, intelligent, and natural Hindi, English, or Hinglish. Keep answers concise, highly intelligent, and direct."
+            val bossSystemText = if (memoryContext.isNotBlank()) {
+                "$baseInstruction\n$memoryContext"
+            } else {
+                baseInstruction
+            }
 
             if (includeSystemInstruction) {
                 val sys = JSONObject().apply {
@@ -197,7 +218,6 @@ class GeminiApiClient {
 
             val contentsArray = JSONArray()
 
-            // Prepend system prompt if systemInstruction is disabled
             val effectivePrompt = if (!includeSystemInstruction) {
                 "[System: $bossSystemText]\n\nBoss query: $prompt"
             } else {
@@ -214,12 +234,24 @@ class GeminiApiClient {
                 })
             }
 
-            // User prompt
+            // User parts (Supports Multimodal Vision Images & Documents)
+            val userParts = JSONArray()
+            if (!imageBase64.isNullOrBlank()) {
+                val inlineData = JSONObject().apply {
+                    put("mimeType", imageMimeType ?: "image/jpeg")
+                    put("data", imageBase64)
+                }
+                userParts.put(JSONObject().apply {
+                    put("inlineData", inlineData)
+                })
+            }
+            userParts.put(JSONObject().apply {
+                put("text", effectivePrompt)
+            })
+
             contentsArray.put(JSONObject().apply {
                 put("role", "user")
-                put("parts", JSONArray().apply {
-                    put(JSONObject().put("text", effectivePrompt))
-                })
+                put("parts", userParts)
             })
 
             payload.put("contents", contentsArray)
@@ -227,7 +259,7 @@ class GeminiApiClient {
             // Generation config
             val genConfig = JSONObject().apply {
                 put("temperature", 0.7)
-                put("maxOutputTokens", 800)
+                put("maxOutputTokens", 1000)
             }
             payload.put("generationConfig", genConfig)
 

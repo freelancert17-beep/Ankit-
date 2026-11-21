@@ -10,6 +10,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import com.jarvis.ai.core.sound.JarvisSoundEffects
 import java.util.Locale
 
 class VoiceManager(
@@ -38,6 +39,7 @@ class VoiceManager(
                     setRecognitionListener(object : RecognitionListener {
                         override fun onReadyForSpeech(params: Bundle?) {
                             onListeningState(true)
+                            JarvisSoundEffects.playListeningStart()
                         }
 
                         override fun onBeginningOfSpeech() {}
@@ -115,7 +117,7 @@ class VoiceManager(
             tts?.setSpeechRate(1.0f)
             isTtsReady = true
 
-            speak("Yes Boss, JARVIS is online and listening.")
+            JarvisSoundEffects.playBootChime()
         }
     }
 
@@ -127,6 +129,7 @@ class VoiceManager(
                 .replace("`", "")
                 .replace("_", "")
                 .replace("•", "")
+                .replace("\n", " ")
                 .trim()
 
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {

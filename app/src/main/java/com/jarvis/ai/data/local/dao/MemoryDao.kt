@@ -13,6 +13,9 @@ interface MemoryDao {
     @Query("SELECT * FROM jarvis_memory ORDER BY updatedAt DESC")
     fun getAllMemories(): Flow<List<MemoryEntity>>
 
+    @Query("SELECT * FROM jarvis_memory ORDER BY updatedAt DESC")
+    suspend fun getMemoriesList(): List<MemoryEntity>
+
     @Query("SELECT * FROM jarvis_memory WHERE `key` = :key LIMIT 1")
     suspend fun getMemoryByKey(key: String): MemoryEntity?
 

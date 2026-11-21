@@ -9,8 +9,7 @@ class PreferencesManager(context: Context) {
     companion object {
         private const val KEY_GEMINI_API = "gemini_api_key"
         private const val KEY_VOICE_ENABLED = "voice_response_enabled"
-        // User's active Gemini API Key
-        private const val DEFAULT_API_KEY = "AQ.Ab8RN6LF11_e0qH4jWLOMeBm41IdYStRIva_pmBKxvWZ5-jGiQ"
+        private const val DEFAULT_API_KEY = ""
     }
 
     var geminiApiKey: String

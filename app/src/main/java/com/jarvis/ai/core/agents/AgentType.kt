@@ -14,6 +14,10 @@ data class AgentExecutionResult(
     val success: Boolean,
     val planSummary: String,
     val outputText: String,
+    val spokenText: String? = null,
     val requiresUserApproval: Boolean = false,
-    val pendingActionDescription: String? = null
+    val pendingActionDescription: String? = null,
+    val generatedFilePath: String? = null,
+    val generatedFileName: String? = null,
+    val generatedFileType: String? = null
 )

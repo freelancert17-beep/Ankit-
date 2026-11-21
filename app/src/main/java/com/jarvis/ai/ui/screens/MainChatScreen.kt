@@ -1,13 +1,18 @@
 package com.jarvis.ai.ui.screens
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -18,12 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,38 +31,51 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.jarvis.ai.R
 import com.jarvis.ai.data.local.entity.ChatMessageEntity
+import com.jarvis.ai.data.local.entity.ChatSessionItem
 import com.jarvis.ai.ui.theme.*
 import com.jarvis.ai.ui.viewmodel.JarvisViewModel
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainChatScreen(viewModel: JarvisViewModel) {
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val coroutineScope = rememberCoroutineScope()
 
     val messages by viewModel.messages.collectAsState()
+    val sessions by viewModel.sessions.collectAsState()
+    val activeSessionId by viewModel.currentSessionId.collectAsState()
     val activeAgent by viewModel.activeAgent.collectAsState()
     val isProcessing by viewModel.isProcessing.collectAsState()
     val isListening by viewModel.isListening.collectAsState()
     val currentApiKey by viewModel.apiKey.collectAsState()
+    val selectedImageUri by viewModel.selectedImageUri.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
-    var showApiKeyDialog by remember { mutableStateOf(false) }
-    var tempApiKey by remember { mutableStateOf("") }
+    var showApiKeyDialog by remember { mutableStateOf(currentApiKey.isBlank()) }
+    var tempApiKey by remember { mutableStateOf(currentApiKey) }
 
     val listState = rememberLazyListState()
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
-    // Permission launcher for Speech Recognition (RECORD_AUDIO)
+    // Speech Audio permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -71,13 +84,20 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
         }
     }
 
+    // Photo/Document Picker launcher for Gemini Vision AI
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        viewModel.selectImage(uri)
+    }
+
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
         }
     }
 
-    // High-tech Arc Reactor rotation & pulse animation
+    // Arc Reactor high-tech rotation & pulse animation
     val infiniteTransition = rememberInfiniteTransition(label = "jarvis_effects")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1.0f,
@@ -89,282 +109,505 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
         label = "pulse_scale"
     )
 
-    Scaffold(
-        modifier = Modifier
-            .fillMaxSize()
-            .imePadding(),
-        topBar = {
-            TopAppBar(
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(vertical = 4.dp)
-                    ) {
-                        // High-tech Arc Reactor Logo Icon
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .scale(pulseScale)
-                                .clip(CircleShape)
-                                .background(JarvisSurface)
-                                .border(1.5.dp, if (isListening) Color(0xFFFF1744) else JarvisCyan, CircleShape)
-                                .padding(4.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_jarvis_logo),
-                                contentDescription = "JARVIS Core",
-                                tint = if (isListening) Color(0xFFFF1744) else JarvisCyan,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.width(10.dp))
-
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "JARVIS AI 5.0",
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = JarvisTextPrimary,
-                                    letterSpacing = 1.sp
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .size(7.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isListening) Color(0xFFFF1744) else JarvisAccentGreen)
-                                )
-                            }
-                            Text(
-                                text = if (isListening) "🎤 LISTENING TO BOSS..." else "ONLINE // ${activeAgent.displayName}",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isListening) Color(0xFFFF5252) else JarvisCyan,
-                                letterSpacing = 0.5.sp
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    // API Key Configuration Button
-                    IconButton(
-                        onClick = {
-                            tempApiKey = currentApiKey
-                            showApiKeyDialog = true
-                        }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Key,
-                            contentDescription = "API Key",
-                            tint = JarvisCyan
-                        )
-                    }
-
-                    // Clear Chat History
-                    IconButton(onClick = { viewModel.clearChat() }) {
-                        Icon(
-                            imageVector = Icons.Default.Delete,
-                            contentDescription = "Clear History",
-                            tint = JarvisTextSecondary
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = JarvisSurface
-                )
-            )
-        },
-        containerColor = JarvisBackground
-    ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) {
-            // Quick Command Chips
-            LazyRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+    // DeepSeek / ChatGPT Style Navigation Drawer
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = JarvisSurface,
+                drawerContentColor = JarvisTextPrimary,
+                modifier = Modifier.width(300.dp)
             ) {
-                val chips = listOf(
-                    "🔦 Torch On",
-                    "💡 Torch Off",
-                    "🔋 Battery Status",
-                    "💰 GST 18% on 5000",
-                    "📈 RSI Analysis",
-                    "🤖 Kaise ho Jarvis?",
-                    "🌤️ Aaj ka mausam kaisa hai?"
-                )
-                items(chips) { chip ->
-                    SuggestionChip(
-                        onClick = {
-                            val clean = chip.substringAfter(" ")
-                            viewModel.sendCommand(clean)
-                        },
-                        label = { Text(chip, color = JarvisCyan, fontSize = 12.sp, fontWeight = FontWeight.Medium) },
-                        colors = SuggestionChipDefaults.suggestionChipColors(containerColor = JarvisSurface),
-                        border = SuggestionChipDefaults.suggestionChipBorder(enabled = true, borderColor = JarvisCardBorder)
-                    )
-                }
-            }
+                Spacer(modifier = Modifier.height(16.dp))
 
-            // Message History List
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(messages) { msg ->
-                    ChatBubbleItem(msg)
-                }
-                if (isProcessing) {
-                    item {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(8.dp)
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                color = JarvisCyan,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                "⚡ JARVIS Neural Engine is thinking...",
-                                color = JarvisCyan,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Bottom Input Bar (Glassmorphic + Keyboard Handled)
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding(),
-                color = JarvisSurface,
-                tonalElevation = 6.dp,
-                border = BorderStroke(1.dp, JarvisCardBorder)
-            ) {
+                // Drawer Header
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .padding(horizontal = 18.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Mic / Voice Command Button
-                    IconButton(
-                        onClick = {
-                            val hasAudioPermission = ContextCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.RECORD_AUDIO
-                            ) == PackageManager.PERMISSION_GRANTED
-
-                            if (hasAudioPermission) {
-                                viewModel.startVoiceInput()
-                            } else {
-                                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                            }
-                        },
+                    Box(
                         modifier = Modifier
-                            .scale(if (isListening) pulseScale else 1.0f)
-                            .size(48.dp)
+                            .size(34.dp)
                             .clip(CircleShape)
-                            .background(if (isListening) Color(0xFFFF1744) else JarvisBlue)
-                            .border(1.5.dp, if (isListening) Color.White else JarvisCyan, CircleShape)
+                            .background(JarvisBlue)
+                            .border(1.5.dp, JarvisCyan, CircleShape),
+                        contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
-                            contentDescription = "Voice Input",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
+                            painter = painterResource(id = R.drawable.ic_jarvis_logo),
+                            contentDescription = null,
+                            tint = JarvisCyan,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "JARVIS ARCHIVES",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = JarvisTextPrimary,
+                            letterSpacing = 1.sp
+                        )
+                        Text(
+                            text = "Active Sessions: ${sessions.size}",
+                            fontSize = 11.sp,
+                            color = JarvisCyan
+                        )
+                    }
+                }
 
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // "+ New Chat" Button
+                Button(
+                    onClick = {
+                        viewModel.startNewChat()
+                        coroutineScope.launch { drawerState.close() }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .height(46.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = JarvisBlue),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.dp, JarvisCyan)
+                ) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = null, tint = JarvisCyan)
                     Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "+ New Chat",
+                        color = JarvisCyan,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
 
-                    // Text Input Field
-                    OutlinedTextField(
-                        value = inputText,
-                        onValueChange = { inputText = it },
-                        placeholder = {
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 14.dp, horizontal = 16.dp),
+                    color = JarvisCardBorder
+                )
+
+                Text(
+                    text = "PREVIOUS CONVERSATIONS",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = JarvisTextSecondary,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+                    letterSpacing = 1.sp
+                )
+
+                // Sessions List
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = 10.dp)
+                ) {
+                    if (sessions.isEmpty()) {
+                        item {
                             Text(
-                                "Ask anything or tap mic to speak…",
+                                text = "No previous chats yet.\nStart asking JARVIS anything!",
                                 color = JarvisTextSecondary,
-                                fontSize = 13.sp
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(20.dp)
                             )
-                        },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        maxLines = 1,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(
-                            onSend = {
+                        }
+                    } else {
+                        items(sessions) { session ->
+                            val isSelected = session.sessionId == activeSessionId
+                            SessionDrawerItem(
+                                session = session,
+                                isSelected = isSelected,
+                                onSelect = {
+                                    viewModel.selectSession(session.sessionId)
+                                    coroutineScope.launch { drawerState.close() }
+                                },
+                                onDelete = {
+                                    viewModel.deleteSession(session.sessionId)
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    ) {
+        Scaffold(
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding(),
+            topBar = {
+                TopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = { coroutineScope.launch { drawerState.open() } }) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = "Menu Drawer",
+                                tint = JarvisCyan
+                            )
+                        }
+                    },
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .scale(pulseScale)
+                                    .clip(CircleShape)
+                                    .background(JarvisSurface)
+                                    .border(1.5.dp, if (isListening) Color(0xFFFF1744) else JarvisCyan, CircleShape)
+                                    .padding(4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_jarvis_logo),
+                                    contentDescription = "JARVIS Core",
+                                    tint = if (isListening) Color(0xFFFF1744) else JarvisCyan,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Column {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "JARVIS AI 5.0",
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        color = JarvisTextPrimary,
+                                        letterSpacing = 1.sp
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(7.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isListening) Color(0xFFFF1744) else JarvisAccentGreen)
+                                    )
+                                }
+                                Text(
+                                    text = if (isListening) "🎤 LISTENING..." else "ONLINE // ${activeAgent.displayName}",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isListening) Color(0xFFFF5252) else JarvisCyan
+                                )
+                            }
+                        }
+                    },
+                    actions = {
+                        // Quick New Chat Action
+                        IconButton(onClick = { viewModel.startNewChat() }) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "New Chat",
+                                tint = JarvisCyan
+                            )
+                        }
+
+                        // API Key Configuration Button
+                        IconButton(
+                            onClick = {
+                                tempApiKey = currentApiKey
+                                showApiKeyDialog = true
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Key,
+                                contentDescription = "API Key",
+                                tint = JarvisCyan
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = JarvisSurface
+                    )
+                )
+            },
+            containerColor = JarvisBackground
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            ) {
+                // Quick Command Chips
+                LazyRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val chips = listOf(
+                        "📄 Student Marksheet banao",
+                        "💰 Expense Budget Sheet banao",
+                        "💬 WhatsApp message bhejo",
+                        "🎵 YouTube par gaana play karo",
+                        "📞 Phone Dialer kholo",
+                        "🔦 Torch On",
+                        "🔋 Battery Status",
+                        "🌐 Aaj ka mausam kaisa hai?"
+                    )
+                    items(chips) { chip ->
+                        SuggestionChip(
+                            onClick = {
+                                val clean = chip.substringAfter(" ")
+                                viewModel.sendCommand(clean, isVoiceQuery = false)
+                            },
+                            label = { Text(chip, color = JarvisCyan, fontSize = 12.sp, fontWeight = FontWeight.Medium) },
+                            colors = SuggestionChipDefaults.suggestionChipColors(containerColor = JarvisSurface),
+                            border = SuggestionChipDefaults.suggestionChipBorder(enabled = true, borderColor = JarvisCardBorder)
+                        )
+                    }
+                }
+
+                // Message History List
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(messages) { msg ->
+                        ChatBubbleItem(
+                            msg = msg,
+                            context = context,
+                            onOpenFile = { path -> viewModel.openFile(context, path) },
+                            onSpeak = { text -> viewModel.speakMessage(text) }
+                        )
+                    }
+                    if (isProcessing) {
+                        item {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(8.dp)
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = JarvisCyan,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "⚡ JARVIS Neural Engine is executing...",
+                                    color = JarvisCyan,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Attached Image Thumbnail Preview (Gemini Vision AI)
+                if (selectedImageUri != null) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        color = JarvisSurface,
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.dp, JarvisCyan)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val thumbnailBitmap = remember(selectedImageUri) {
+                                try {
+                                    context.contentResolver.openInputStream(selectedImageUri!!)?.use {
+                                        BitmapFactory.decodeStream(it)?.asImageBitmap()
+                                    }
+                                } catch (_: Exception) { null }
+                            }
+
+                            if (thumbnailBitmap != null) {
+                                Image(
+                                    bitmap = thumbnailBitmap,
+                                    contentDescription = "Selected image preview",
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(8.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "📷 Image Attached for Vision AI",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = JarvisCyan
+                                )
+                                Text(
+                                    text = "Jarvis will analyze this photo",
+                                    fontSize = 11.sp,
+                                    color = JarvisTextSecondary
+                                )
+                            }
+
+                            IconButton(onClick = { viewModel.selectImage(null) }) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Remove attached photo",
+                                    tint = JarvisTextSecondary
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Bottom Input Bar
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding(),
+                    color = JarvisSurface,
+                    tonalElevation = 6.dp,
+                    border = BorderStroke(1.dp, JarvisCardBorder)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Mic / Voice Command Button (Iron Man arc reactor sound)
+                        IconButton(
+                            onClick = {
+                                val hasAudioPermission = ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO
+                                ) == PackageManager.PERMISSION_GRANTED
+
+                                if (hasAudioPermission) {
+                                    viewModel.startVoiceInput()
+                                } else {
+                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            },
+                            modifier = Modifier
+                                .scale(if (isListening) pulseScale else 1.0f)
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(if (isListening) Color(0xFFFF1744) else JarvisBlue)
+                                .border(1.5.dp, if (isListening) Color.White else JarvisCyan, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                                contentDescription = "Voice Input",
+                                tint = Color.White,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        // Photo / Document Picker for Gemini Vision
+                        IconButton(
+                            onClick = { imagePickerLauncher.launch("image/*") },
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(JarvisBackground)
+                                .border(1.dp, JarvisCardBorder, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AttachFile,
+                                contentDescription = "Attach Photo",
+                                tint = if (selectedImageUri != null) JarvisCyan else JarvisTextSecondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        // Text Input Field
+                        OutlinedTextField(
+                            value = inputText,
+                            onValueChange = { inputText = it },
+                            placeholder = {
+                                Text(
+                                    "Ask anything or type command…",
+                                    color = JarvisTextSecondary,
+                                    fontSize = 13.sp
+                                )
+                            },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true,
+                            maxLines = 1,
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(
+                                onSend = {
+                                    if (inputText.isNotBlank() || selectedImageUri != null) {
+                                        viewModel.sendCommand(inputText, isVoiceQuery = false)
+                                        inputText = ""
+                                        keyboardController?.hide()
+                                    }
+                                }
+                            ),
+                            trailingIcon = {
                                 if (inputText.isNotBlank()) {
-                                    viewModel.sendCommand(inputText)
+                                    IconButton(onClick = { inputText = "" }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Clear,
+                                            contentDescription = "Clear",
+                                            tint = JarvisTextSecondary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = JarvisTextPrimary,
+                                unfocusedTextColor = JarvisTextPrimary,
+                                focusedBorderColor = JarvisCyan,
+                                unfocusedBorderColor = JarvisCardBorder,
+                                focusedContainerColor = JarvisBackground,
+                                unfocusedContainerColor = JarvisBackground
+                            ),
+                            shape = RoundedCornerShape(26.dp)
+                        )
+
+                        Spacer(modifier = Modifier.width(6.dp))
+
+                        // Send Button
+                        IconButton(
+                            onClick = {
+                                if (inputText.isNotBlank() || selectedImageUri != null) {
+                                    viewModel.sendCommand(inputText, isVoiceQuery = false)
                                     inputText = ""
                                     keyboardController?.hide()
                                 }
-                            }
-                        ),
-                        trailingIcon = {
-                            if (inputText.isNotBlank()) {
-                                IconButton(onClick = { inputText = "" }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Clear,
-                                        contentDescription = "Clear",
-                                        tint = JarvisTextSecondary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = JarvisTextPrimary,
-                            unfocusedTextColor = JarvisTextPrimary,
-                            focusedBorderColor = JarvisCyan,
-                            unfocusedBorderColor = JarvisCardBorder,
-                            focusedContainerColor = JarvisBackground,
-                            unfocusedContainerColor = JarvisBackground
-                        ),
-                        shape = RoundedCornerShape(26.dp)
-                    )
-
-                    Spacer(modifier = Modifier.width(8.dp))
-
-                    // Send Button
-                    IconButton(
-                        onClick = {
-                            if (inputText.isNotBlank()) {
-                                viewModel.sendCommand(inputText)
-                                inputText = ""
-                                keyboardController?.hide()
-                            }
-                        },
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(CircleShape)
-                            .background(if (inputText.isNotBlank()) JarvisCyan else JarvisCardBorder)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Send,
-                            contentDescription = "Send Command",
-                            tint = if (inputText.isNotBlank()) JarvisBackground else JarvisTextSecondary,
-                            modifier = Modifier.size(22.dp)
-                        )
+                            },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(if (inputText.isNotBlank() || selectedImageUri != null) JarvisCyan else JarvisCardBorder)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Send,
+                                contentDescription = "Send Command",
+                                tint = if (inputText.isNotBlank() || selectedImageUri != null) JarvisBackground else JarvisTextSecondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -435,8 +678,80 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
 }
 
 @Composable
-fun ChatBubbleItem(msg: ChatMessageEntity) {
+fun SessionDrawerItem(
+    session: ChatSessionItem,
+    isSelected: Boolean,
+    onSelect: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val dateStr = remember(session.lastTimestamp) {
+        SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(session.lastTimestamp))
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .clickable { onSelect() },
+        color = if (isSelected) JarvisBlue.copy(alpha = 0.5f) else Color.Transparent,
+        shape = RoundedCornerShape(10.dp),
+        border = if (isSelected) BorderStroke(1.dp, JarvisCyan) else null
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.ChatBubbleOutline,
+                contentDescription = null,
+                tint = if (isSelected) JarvisCyan else JarvisTextSecondary,
+                modifier = Modifier.size(18.dp)
+            )
+
+            Spacer(modifier = Modifier.width(10.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = session.title,
+                    color = if (isSelected) JarvisCyan else JarvisTextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = dateStr,
+                    color = JarvisTextSecondary,
+                    fontSize = 10.sp
+                )
+            }
+
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete Session",
+                    tint = JarvisTextSecondary.copy(alpha = 0.6f),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ChatBubbleItem(
+    msg: ChatMessageEntity,
+    context: Context,
+    onOpenFile: (String) -> Unit,
+    onSpeak: (String) -> Unit
+) {
     val isUser = msg.sender == "USER"
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
@@ -458,34 +773,135 @@ fun ChatBubbleItem(msg: ChatMessageEntity) {
                     RoundedCornerShape(16.dp)
                 )
                 .padding(12.dp)
-                .widthIn(max = 310.dp)
+                .widthIn(max = 320.dp)
         ) {
             Column {
-                if (!isUser && !msg.executionPlan.isNullOrBlank()) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
+                // Attached Photo Preview for User
+                if (isUser && !msg.imageUri.isNullOrBlank()) {
+                    val userImageBitmap = remember(msg.imageUri) {
+                        try {
+                            val uri = Uri.parse(msg.imageUri)
+                            context.contentResolver.openInputStream(uri)?.use { stream ->
+                                BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                            }
+                        } catch (_: Exception) { null }
+                    }
+
+                    if (userImageBitmap != null) {
+                        Image(
+                            bitmap = userImageBitmap,
+                            contentDescription = "User attached image",
                             modifier = Modifier
-                                .size(6.dp)
-                                .clip(CircleShape)
-                                .background(JarvisCyan)
+                                .fillMaxWidth()
+                                .heightIn(max = 180.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Crop
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = msg.executionPlan.uppercase(),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = JarvisCyan,
-                            letterSpacing = 0.5.sp
-                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                }
+
+                // Agent Header / Execution Plan for Jarvis
+                if (!isUser && !msg.executionPlan.isNullOrBlank()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .clip(CircleShape)
+                                    .background(JarvisCyan)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = msg.executionPlan.uppercase(),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = JarvisCyan,
+                                letterSpacing = 0.5.sp
+                            )
+                        }
+
+                        // Tap-to-speak button
+                        IconButton(
+                            onClick = { onSpeak(msg.content) },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.VolumeUp,
+                                contentDescription = "Listen to answer",
+                                tint = JarvisCyan,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                 }
-                Text(
-                    text = msg.content,
-                    color = JarvisTextPrimary,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp
-                )
+
+                // Message Text
+                if (msg.content.isNotBlank()) {
+                    Text(
+                        text = msg.content,
+                        color = JarvisTextPrimary,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp
+                    )
+                }
+
+                // Generated Document / Sheet Card (Download / Open)
+                if (!msg.filePath.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onOpenFile(msg.filePath) },
+                        color = JarvisBackground,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, JarvisCyan)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Description,
+                                contentDescription = null,
+                                tint = JarvisCyan,
+                                modifier = Modifier.size(28.dp)
+                            )
+
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = msg.fileName ?: "Spreadsheet / Document",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = JarvisTextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Tap to open or share",
+                                    fontSize = 10.sp,
+                                    color = JarvisCyan
+                                )
+                            }
+
+                            Icon(
+                                imageVector = Icons.Default.OpenInNew,
+                                contentDescription = "Open Document",
+                                tint = JarvisCyan,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
     }

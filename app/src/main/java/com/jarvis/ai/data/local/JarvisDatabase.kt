@@ -12,7 +12,7 @@ import com.jarvis.ai.data.local.entity.MemoryEntity
 
 @Database(
     entities = [ChatMessageEntity::class, MemoryEntity::class, AgentTaskEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class JarvisDatabase : RoomDatabase() {
@@ -29,7 +29,9 @@ abstract class JarvisDatabase : RoomDatabase() {
                     context.applicationContext,
                     JarvisDatabase::class.java,
                     "jarvis_master_db"
-                ).build()
+                )
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }
