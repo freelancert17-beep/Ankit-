@@ -13,6 +13,23 @@ class RuleEngine(private val context: Context) {
     fun matchAndExecute(rawQuery: String): AgentExecutionResult? {
         val q = rawQuery.trim().lowercase()
 
+        // 0. Persona & Greetings ("Jarvis kaise ho", "Kya haal hai", "How are you")
+        if (q.contains("kaise ho") || q.contains("kya haal") || q.contains("how are you") ||
+            q == "hello jarvis" || q == "hi jarvis" || q == "hey jarvis" || q == "jarvis"
+        ) {
+            return AgentExecutionResult(
+                agentType = AgentType.MAIN_JARVIS,
+                success = true,
+                planSummary = "JARVIS Persona Greeting",
+                outputText = "Main bilkul shaandar hoon Boss! JARVIS neural engine 100% active aur fully operational hai.\n\n" +
+                        "Aapka order milte hi systems ready hain. Batayein aaj kya command execute karni hai?\n" +
+                        "• Koi **Website, Python Program ya AI Agent** banayein?\n" +
+                        "• Koi customized **Excel / CSV Sheet** generate karein?\n" +
+                        "• Ya **Share Market** ka live research aur chart analysis karein?",
+                spokenText = "Main bilkul shaandar hoon Boss! Batayein aaj kya naya command ya project banana hai?"
+            )
+        }
+
         // 1. Flashlight / Torch
         if (q.contains("torch on") || q.contains("flashlight on") || q.contains("light on") || q.contains("टॉर्च चालू")) {
             val res = toggleTorch(true)
@@ -20,7 +37,7 @@ class RuleEngine(private val context: Context) {
                 agentType = AgentType.AUTOMATION,
                 success = res,
                 planSummary = "Turn on device camera flashlight",
-                outputText = if (res) "Sir, flashlight has been turned ON." else "Unable to activate flashlight, Sir."
+                outputText = if (res) "Boss, flashlight turn ON kar di hai." else "Torch activate nahi ho saki Boss."
             )
         }
         if (q.contains("torch off") || q.contains("flashlight off") || q.contains("light off") || q.contains("टॉर्च बंद")) {
@@ -29,7 +46,7 @@ class RuleEngine(private val context: Context) {
                 agentType = AgentType.AUTOMATION,
                 success = res,
                 planSummary = "Turn off device camera flashlight",
-                outputText = if (res) "Sir, flashlight has been turned OFF." else "Unable to turn off flashlight, Sir."
+                outputText = if (res) "Boss, flashlight turn OFF kar di hai." else "Torch off nahi ho saki Boss."
             )
         }
 
@@ -41,7 +58,7 @@ class RuleEngine(private val context: Context) {
                 agentType = AgentType.AUTOMATION,
                 success = true,
                 planSummary = "Query hardware BatteryManager",
-                outputText = "Sir, your phone's battery level is currently at $level%."
+                outputText = "Boss, aapke phone ki battery currently $level% hai. System power optimal hai."
             )
         }
 
@@ -60,7 +77,7 @@ class RuleEngine(private val context: Context) {
                 agentType = AgentType.OFFICE,
                 success = true,
                 planSummary = "Compute GST breakdown (CGST + SGST)",
-                outputText = "Sir, GST Breakdown for ₹$amount @ $rate%:\n• CGST (Half): ₹$cgst\n• SGST (Half): ₹$sgst\n• Total GST: ₹$gstAmount\n• Grand Total: ₹$total"
+                outputText = "Boss, GST Breakdown for ₹$amount @ $rate%:\n• CGST (Half): ₹$cgst\n• SGST (Half): ₹$sgst\n• Total GST: ₹$gstAmount\n• Grand Total: ₹$total\n\nBoss, kya is calculation ki invoice ya sheet banani hai?"
             )
         }
 

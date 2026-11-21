@@ -15,6 +15,7 @@ import com.jarvis.ai.core.agents.AgentOrchestrator
 import com.jarvis.ai.core.agents.AgentType
 import com.jarvis.ai.core.sound.JarvisSoundEffects
 import com.jarvis.ai.core.voice.VoiceManager
+import com.jarvis.ai.data.local.AiProvider
 import com.jarvis.ai.data.local.JarvisDatabase
 import com.jarvis.ai.data.local.PreferencesManager
 import com.jarvis.ai.data.local.entity.ChatMessageEntity
@@ -47,7 +48,7 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // All chat sessions list for the ChatGPT/DeepSeek side drawer
+    // All chat sessions list for the side drawer
     private val _sessions = MutableStateFlow<List<ChatSessionItem>>(emptyList())
     val sessions: StateFlow<List<ChatSessionItem>> = _sessions.asStateFlow()
 
@@ -74,7 +75,11 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
     private val _isProcessing = MutableStateFlow(false)
     val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
 
-    private val _apiKey = MutableStateFlow(prefs.geminiApiKey)
+    // Multi-Provider state
+    private val _selectedProvider = MutableStateFlow(prefs.selectedProvider)
+    val selectedProvider: StateFlow<AiProvider> = _selectedProvider.asStateFlow()
+
+    private val _apiKey = MutableStateFlow(prefs.getActiveApiKey())
     val apiKey: StateFlow<String> = _apiKey.asStateFlow()
 
     init {
@@ -121,9 +126,25 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
         _selectedImageUri.value = uri
     }
 
+    fun selectProvider(provider: AiProvider) {
+        prefs.selectedProvider = provider
+        _selectedProvider.value = provider
+        _apiKey.value = prefs.getActiveApiKey()
+    }
+
+    fun updateKeyForProvider(provider: AiProvider, newKey: String) {
+        prefs.setKeyForProvider(provider, newKey)
+        if (provider == prefs.selectedProvider) {
+            _apiKey.value = newKey
+        }
+    }
+
+    fun getKeyForProvider(provider: AiProvider): String {
+        return prefs.getKeyForProvider(provider)
+    }
+
     fun updateApiKey(newKey: String) {
-        prefs.geminiApiKey = newKey
-        _apiKey.value = newKey
+        updateKeyForProvider(_selectedProvider.value, newKey)
     }
 
     fun startVoiceInput() {
@@ -174,7 +195,7 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
                 imageMimeType = imageBundle?.second
             }
 
-            // Execute via Multi-Agent & Gemini Orchestrator
+            // Execute via Multi-Agent & Multi-Model Orchestrator
             val result = orchestrator.routeAndExecute(
                 query = query,
                 history = history,
@@ -200,9 +221,8 @@ class JarvisViewModel(application: Application) : AndroidViewModel(application) 
             JarvisSoundEffects.playTaskComplete()
 
             // Voice response:
-            // Only speak aloud if triggered by Voice Assistant OR if voice is explicitly enabled and query came from voice
+            // Only speak aloud if triggered by Voice Assistant
             if (isVoiceQuery) {
-                // If a document was generated, speak concise confirmation instead of entire data!
                 val textToSpeak = result.spokenText ?: result.outputText
                 voiceManager.speak(textToSpeak)
             }

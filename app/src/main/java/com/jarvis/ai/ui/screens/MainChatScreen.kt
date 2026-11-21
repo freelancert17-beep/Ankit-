@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.jarvis.ai.R
+import com.jarvis.ai.data.local.AiProvider
 import com.jarvis.ai.data.local.entity.ChatMessageEntity
 import com.jarvis.ai.data.local.entity.ChatSessionItem
 import com.jarvis.ai.ui.theme.*
@@ -65,11 +66,13 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
     val activeAgent by viewModel.activeAgent.collectAsState()
     val isProcessing by viewModel.isProcessing.collectAsState()
     val isListening by viewModel.isListening.collectAsState()
+    val selectedProvider by viewModel.selectedProvider.collectAsState()
     val currentApiKey by viewModel.apiKey.collectAsState()
     val selectedImageUri by viewModel.selectedImageUri.collectAsState()
 
     var inputText by remember { mutableStateOf("") }
-    var showApiKeyDialog by remember { mutableStateOf(currentApiKey.isBlank()) }
+    var showApiKeyDialog by remember { mutableStateOf(false) } // Never force popup on startup!
+    var dialogProvider by remember { mutableStateOf(selectedProvider) }
     var tempApiKey by remember { mutableStateOf(currentApiKey) }
 
     val listState = rememberLazyListState()
@@ -84,7 +87,7 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
         }
     }
 
-    // Photo/Document Picker launcher for Gemini Vision AI
+    // Photo/Document Picker launcher for Vision AI
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -152,7 +155,7 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
                             letterSpacing = 1.sp
                         )
                         Text(
-                            text = "Active Sessions: ${sessions.size}",
+                            text = "Active Engine: ${selectedProvider.displayName}",
                             fontSize = 11.sp,
                             color = JarvisCyan
                         )
@@ -295,7 +298,7 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
                                     )
                                 }
                                 Text(
-                                    text = if (isListening) "🎤 LISTENING..." else "ONLINE // ${activeAgent.displayName}",
+                                    text = if (isListening) "🎤 LISTENING..." else "ONLINE // ${selectedProvider.displayName}",
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = if (isListening) Color(0xFFFF5252) else JarvisCyan
@@ -313,16 +316,17 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
                             )
                         }
 
-                        // API Key Configuration Button
+                        // AI Model & API Key Configuration Button
                         IconButton(
                             onClick = {
-                                tempApiKey = currentApiKey
+                                dialogProvider = selectedProvider
+                                tempApiKey = viewModel.getKeyForProvider(selectedProvider)
                                 showApiKeyDialog = true
                             }
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Key,
-                                contentDescription = "API Key",
+                                contentDescription = "AI Engine & Keys",
                                 tint = JarvisCyan
                             )
                         }
@@ -347,14 +351,16 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     val chips = listOf(
+                        "🤖 Jarvis kaise ho?",
+                        "📈 Share market ka kya haal hai?",
+                        "🌐 Modern Website banao",
+                        "🐍 Python Automation Script banao",
+                        "💰 Monthly Expense Budget Sheet banao",
                         "📄 Student Marksheet banao",
-                        "💰 Expense Budget Sheet banao",
                         "💬 WhatsApp message bhejo",
                         "🎵 YouTube par gaana play karo",
-                        "📞 Phone Dialer kholo",
                         "🔦 Torch On",
-                        "🔋 Battery Status",
-                        "🌐 Aaj ka mausam kaisa hai?"
+                        "🔋 Battery Status"
                     )
                     items(chips) { chip ->
                         SuggestionChip(
@@ -401,7 +407,7 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    "⚡ JARVIS Neural Engine is executing...",
+                                    "⚡ JARVIS Neural Engine (${selectedProvider.displayName}) is thinking...",
                                     color = JarvisCyan,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold
@@ -411,7 +417,7 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
                     }
                 }
 
-                // Attached Image Thumbnail Preview (Gemini Vision AI)
+                // Attached Image Thumbnail Preview (Vision AI)
                 if (selectedImageUri != null) {
                     Surface(
                         modifier = Modifier
@@ -519,7 +525,7 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
 
                         Spacer(modifier = Modifier.width(6.dp))
 
-                        // Photo / Document Picker for Gemini Vision
+                        // Photo / Document Picker for Vision
                         IconButton(
                             onClick = { imagePickerLauncher.launch("image/*") },
                             modifier = Modifier
@@ -614,7 +620,7 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
         }
     }
 
-    // Gemini API Key Setup Dialog
+    // Multi-AI Model & API Key Setup Dialog
     if (showApiKeyDialog) {
         AlertDialog(
             onDismissRequest = { showApiKeyDialog = false },
@@ -623,7 +629,7 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
                     Icon(imageVector = Icons.Default.Key, contentDescription = null, tint = JarvisCyan)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        "Gemini API Key Setup",
+                        "AI Engine & Key Settings",
                         color = JarvisCyan,
                         fontWeight = FontWeight.Bold,
                         fontSize = 17.sp
@@ -633,16 +639,63 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
             text = {
                 Column {
                     Text(
-                        "Boss, live unlimited Gemini AI response ke liye apni API key yahan set karein:",
-                        fontSize = 13.sp,
-                        color = JarvisTextSecondary,
-                        lineHeight = 18.sp
+                        "Select AI Brain for JARVIS:",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = JarvisTextSecondary
                     )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // AI Provider Selection Chips
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(AiProvider.entries) { provider ->
+                            val isChosen = provider == dialogProvider
+                            FilterChip(
+                                selected = isChosen,
+                                onClick = {
+                                    dialogProvider = provider
+                                    tempApiKey = viewModel.getKeyForProvider(provider)
+                                },
+                                label = {
+                                    Text(
+                                        text = provider.displayName,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isChosen) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isChosen) JarvisBackground else JarvisTextPrimary
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = JarvisCyan,
+                                    containerColor = JarvisSurface
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = isChosen,
+                                    borderColor = if (isChosen) JarvisCyan else JarvisCardBorder
+                                )
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "• Model: ${dialogProvider.defaultModel}\n• Free Key URL: ${dialogProvider.helpUrl}",
+                        fontSize = 11.sp,
+                        color = JarvisCyan,
+                        lineHeight = 16.sp
+                    )
+
                     Spacer(modifier = Modifier.height(10.dp))
+
                     OutlinedTextField(
                         value = tempApiKey,
                         onValueChange = { tempApiKey = it },
-                        placeholder = { Text("AQ... ya AIzaSy...", color = JarvisTextSecondary) },
+                        placeholder = { Text("Enter ${dialogProvider.displayName} API Key…", color = JarvisTextSecondary, fontSize = 12.sp) },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = JarvisTextPrimary,
@@ -659,13 +712,14 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.updateApiKey(tempApiKey)
+                        viewModel.selectProvider(dialogProvider)
+                        viewModel.updateKeyForProvider(dialogProvider, tempApiKey)
                         showApiKeyDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = JarvisCyan),
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    Text("Save Key", color = JarvisBackground, fontWeight = FontWeight.Bold)
+                    Text("Save & Activate", color = JarvisBackground, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
