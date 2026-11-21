@@ -15,7 +15,7 @@ interface ChatDao {
     @Query("SELECT * FROM chat_messages ORDER BY timestamp ASC")
     fun getAllMessages(): Flow<List<ChatMessageEntity>>
 
-    @Query("SELECT DISTINCT sessionId FROM chat_messages ORDER BY timestamp DESC")
+    @Query("SELECT sessionId FROM chat_messages GROUP BY sessionId ORDER BY MAX(timestamp) DESC")
     fun getAllSessionIds(): Flow<List<String>>
 
     @Query("SELECT * FROM chat_messages WHERE sessionId = :sessionId AND sender = 'USER' ORDER BY timestamp ASC LIMIT 1")

@@ -264,7 +264,12 @@ class AppAutomationManager(private val context: Context) {
             }
             return try {
                 context.startActivity(cameraIntent)
-                AgentExecutionResult(AgentType.AUTOMATION, true, "Launch Camera", "Boss, Camera open kar diya hai.")
+                AgentExecutionResult(
+                    agentType = AgentType.AUTOMATION,
+                    success = true,
+                    planSummary = "Launch Camera",
+                    outputText = "Boss, Camera open kar diya hai."
+                )
             } catch (_: Exception) { null }
         }
 
@@ -274,7 +279,12 @@ class AppAutomationManager(private val context: Context) {
             }
             return try {
                 context.startActivity(galleryIntent)
-                AgentExecutionResult(AgentType.AUTOMATION, true, "Launch Photos/Gallery", "Boss, Gallery open kar di hai.")
+                AgentExecutionResult(
+                    agentType = AgentType.AUTOMATION,
+                    success = true,
+                    planSummary = "Launch Photos/Gallery",
+                    outputText = "Boss, Gallery open kar di hai."
+                )
             } catch (_: Exception) { null }
         }
 
@@ -284,7 +294,12 @@ class AppAutomationManager(private val context: Context) {
             }
             return try {
                 context.startActivity(settingsIntent)
-                AgentExecutionResult(AgentType.AUTOMATION, true, "Launch System Settings", "Boss, Phone Settings open kar di hain.")
+                AgentExecutionResult(
+                    agentType = AgentType.AUTOMATION,
+                    success = true,
+                    planSummary = "Launch System Settings",
+                    outputText = "Boss, Phone Settings open kar di hain."
+                )
             } catch (_: Exception) { null }
         }
 

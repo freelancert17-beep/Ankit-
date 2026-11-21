@@ -60,7 +60,7 @@ object JarvisSoundEffects {
     fun playAlert() {
         CoroutineScope(Dispatchers.Default).launch {
             try {
-                toneGenerator?.startTone(ToneGenerator.TONE_CDMA_ALERT_AUTOREDIAL, 120)
+                toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP2, 120)
             } catch (_: Exception) {}
         }
     }

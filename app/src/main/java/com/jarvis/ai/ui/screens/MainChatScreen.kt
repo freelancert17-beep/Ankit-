@@ -648,7 +648,9 @@ fun MainChatScreen(viewModel: JarvisViewModel) {
                             focusedTextColor = JarvisTextPrimary,
                             unfocusedTextColor = JarvisTextPrimary,
                             focusedBorderColor = JarvisCyan,
-                            unfocusedBorderColor = JarvisCardBorder
+                            unfocusedBorderColor = JarvisCardBorder,
+                            focusedContainerColor = JarvisBackground,
+                            unfocusedContainerColor = JarvisBackground
                         ),
                         shape = RoundedCornerShape(12.dp)
                     )
@@ -704,7 +706,7 @@ fun SessionDrawerItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                imageVector = Icons.Default.ChatBubbleOutline,
+                imageVector = Icons.Default.Chat,
                 contentDescription = null,
                 tint = if (isSelected) JarvisCyan else JarvisTextSecondary,
                 modifier = Modifier.size(18.dp)
@@ -746,9 +748,9 @@ fun SessionDrawerItem(
 @Composable
 fun ChatBubbleItem(
     msg: ChatMessageEntity,
-    context: Context,
-    onOpenFile: (String) -> Unit,
-    onSpeak: (String) -> Unit
+    context: Context = LocalContext.current,
+    onOpenFile: (String) -> Unit = {},
+    onSpeak: (String) -> Unit = {}
 ) {
     val isUser = msg.sender == "USER"
 
