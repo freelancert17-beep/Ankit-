@@ -5,7 +5,7 @@ import com.jarvis.ai.data.repository.JarvisRepository
 class MemoryBrain(private val repository: JarvisRepository) {
 
     /**
-     * Inspects input text for personal facts and automatically saves them.
+     * Inspects input text for personal facts, preferences, goals, and projects.
      * Returns true if a memory was detected and saved.
      */
     suspend fun extractAndSaveMemory(query: String): Boolean {
@@ -42,14 +42,23 @@ class MemoryBrain(private val repository: JarvisRepository) {
             return true
         }
 
-        // 4. Explicit Memory command ("yaad rakhna ki [X]" / "remember that [X]")
+        // 4. Goal & Project Tracking ("hamara goal [X] hai", "project [X] par kaam kar rahe hain")
+        if (lower.contains("goal hai") || lower.contains("target hai") || lower.contains("my goal is")) {
+            val goalText = q.substringAfter("goal hai").substringAfter("target hai").substringAfter("is").trim()
+            if (goalText.isNotBlank()) {
+                repository.saveMemory("active_goal", goalText, "GOAL")
+                return true
+            }
+        }
+
+        // 5. Explicit Memory command ("yaad rakhna ki [X]" / "remember that [X]")
         if (lower.startsWith("yaad rakhna ki ") || lower.startsWith("yaad rakhna ") || lower.startsWith("remember that ")) {
             val note = q.substringAfter("yaad rakhna ki ")
                 .substringAfter("yaad rakhna ")
                 .substringAfter("remember that ")
                 .trim()
             if (note.isNotBlank()) {
-                repository.saveMemory("note_${System.currentTimeMillis() % 100000}", note, "NOTE")
+                repository.saveMemory("note_${System.currentTimeMillis() % 100000}", note, "EPISODIC")
                 return true
             }
         }
@@ -58,7 +67,7 @@ class MemoryBrain(private val repository: JarvisRepository) {
     }
 
     /**
-     * Formats all saved memories into a clean prompt context block for Gemini.
+     * Formats all saved memories into a clean prompt context block for LLMs.
      */
     suspend fun getFormattedMemoryContext(): String {
         val memories = repository.getAllMemoriesList()
@@ -68,9 +77,28 @@ class MemoryBrain(private val repository: JarvisRepository) {
         sb.append("\n=== USER PERSONAL BRAIN & LONG-TERM MEMORIES ===\n")
         for (m in memories) {
             val readableKey = m.key.replace("_", " ").replaceFirstChar { it.uppercase() }
-            sb.append("• $readableKey: ${m.value}\n")
+            sb.append("• [$readableKey] (${m.category}): ${m.value}\n")
         }
-        sb.append("Always remember these personal facts about Boss when answering.\n===============================================\n")
+        sb.append("Always honor and remember these facts when interacting with Boss.\n===============================================\n")
         return sb.toString()
+    }
+
+    /**
+     * Context Compression: Condenses older conversation turns to prevent context window overflow
+     * while retaining critical context and recent turns.
+     */
+    fun compressChatHistory(history: List<Pair<String, String>>, maxRecent: Int = 6): List<Pair<String, String>> {
+        if (history.size <= maxRecent) return history
+
+        val older = history.dropLast(maxRecent)
+        val recent = history.takeLast(maxRecent)
+
+        // Compress older messages into a single summary entry
+        val summaryBullets = older.take(4).joinToString("; ") { (sender, text) ->
+            "$sender asked: ${text.take(40)}"
+        }
+
+        val compressedEntry = Pair("SYSTEM", "[Previous conversation context summary: $summaryBullets]")
+        return listOf(compressedEntry) + recent
     }
 }

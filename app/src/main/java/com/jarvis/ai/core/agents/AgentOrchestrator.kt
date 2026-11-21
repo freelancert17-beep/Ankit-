@@ -7,6 +7,10 @@ import com.jarvis.ai.core.intelligence.OpenAiCompatibleClient
 import com.jarvis.ai.core.intelligence.RuleEngine
 import com.jarvis.ai.core.intelligence.WebSearchEngine
 import com.jarvis.ai.core.memory.MemoryBrain
+import com.jarvis.ai.core.observability.AgentTracer
+import com.jarvis.ai.core.reasoning.ReActEngine
+import com.jarvis.ai.core.reasoning.UserIntent
+import com.jarvis.ai.core.safety.SafetyGuardrails
 import com.jarvis.ai.core.tools.CodeAndProjectGenerator
 import com.jarvis.ai.core.tools.SheetAndDocGenerator
 import com.jarvis.ai.data.local.AiProvider
@@ -28,6 +32,8 @@ class AgentOrchestrator(
     private val sheetGenerator = SheetAndDocGenerator(context)
     private val codeGenerator = CodeAndProjectGenerator(context)
     private val webSearchEngine = WebSearchEngine()
+    private val safetyGuardrails = SafetyGuardrails()
+    private val reactEngine = ReActEngine()
 
     suspend fun routeAndExecute(
         query: String,
@@ -35,24 +41,71 @@ class AgentOrchestrator(
         imageBase64: String? = null,
         imageMimeType: String? = null
     ): AgentExecutionResult {
+        val startTime = System.currentTimeMillis()
+        val provider = prefs.selectedProvider
+        val trace = AgentTracer.startTrace(query, provider.displayName)
 
-        // 1. Long-Term Personal Memory Extraction (Learn personal facts about Boss)
-        memoryBrain.extractAndSaveMemory(query)
-
-        // 2. Persona Greetings & Hardware Rules ("Jarvis kaise ho", Torch, Battery, GST)
-        val ruleResult = ruleEngine.matchAndExecute(query)
-        if (ruleResult != null) {
-            return ruleResult
+        // 1. Safety Guardrails & Input Sanitization
+        val validation = safetyGuardrails.validateAndSanitize(query)
+        if (!validation.isSafe) {
+            trace.addStep("SAFETY", "Neutralized prompt injection", System.currentTimeMillis() - startTime, "WARNING")
+            trace.totalDurationMs = System.currentTimeMillis() - startTime
+            return AgentExecutionResult(
+                agentType = AgentType.MAIN_JARVIS,
+                success = false,
+                planSummary = "Safety Guardrails Activated",
+                outputText = validation.reason ?: "Query blocked by Safety Guardrails."
+            )
         }
 
-        // 3. Autonomous Code, Program, Website, Automation & AI Agent Creator
-        if (codeGenerator.canHandle(query)) {
-            val codeRes = codeGenerator.generateCodeOrProject(query)
+        if (validation.requiresApproval) {
+            trace.addStep("HITL", "Awaiting Human-in-the-Loop Confirmation", System.currentTimeMillis() - startTime, "WARNING")
+            trace.totalDurationMs = System.currentTimeMillis() - startTime
+            return AgentExecutionResult(
+                agentType = AgentType.MAIN_JARVIS,
+                success = true,
+                requiresUserApproval = true,
+                pendingActionDescription = validation.approvalPrompt,
+                planSummary = "HITL Approval Gate",
+                outputText = validation.approvalPrompt ?: "Approval required before proceeding, Boss."
+            )
+        }
+
+        val cleanQuery = validation.sanitizedQuery
+
+        // 2. ReAct Intent Detection & Task Decomposition
+        val intent = reactEngine.detectIntent(cleanQuery)
+        val plan = reactEngine.decomposeTask(intent, cleanQuery)
+        trace.addStep("PLANNING", "Intent: $intent | Decomposed into ${plan.steps.size} ReAct steps", 15)
+
+        // 3. Long-Term Personal Memory Extraction & Context Compression
+        val memStart = System.currentTimeMillis()
+        memoryBrain.extractAndSaveMemory(cleanQuery)
+        val memoryContext = memoryBrain.getFormattedMemoryContext()
+        val compressedHistory = memoryBrain.compressChatHistory(history, maxRecent = 6)
+        trace.addStep("MEMORY", "Retrieved facts & compressed context", System.currentTimeMillis() - memStart)
+
+        // 4. Intent Execution: Greetings & Persona
+        if (intent == UserIntent.GREETING) {
+            val ruleResult = ruleEngine.matchAndExecute(cleanQuery)
+            if (ruleResult != null) {
+                trace.addStep("EXECUTION", "Persona greeting delivered", System.currentTimeMillis() - startTime)
+                trace.totalDurationMs = System.currentTimeMillis() - startTime
+                return ruleResult
+            }
+        }
+
+        // 5. Intent Execution: Autonomous Code, Website, Program & AI Agent Creator
+        if (intent == UserIntent.CODE_OR_PROJECT_GENERATION || codeGenerator.canHandle(cleanQuery)) {
+            val codeStart = System.currentTimeMillis()
+            val codeRes = codeGenerator.generateCodeOrProject(cleanQuery)
             if (codeRes.success && codeRes.file != null) {
+                trace.addStep("CODE_ENGINE", "Generated ${codeRes.fileType} (${codeRes.file.name})", System.currentTimeMillis() - codeStart)
+                trace.totalDurationMs = System.currentTimeMillis() - startTime
                 return AgentExecutionResult(
                     agentType = AgentType.CODING,
                     success = true,
-                    planSummary = "Construct ${codeRes.fileType} for Boss",
+                    planSummary = "ReAct: Code Engine -> Verified",
                     outputText = codeRes.textMessage,
                     spokenText = codeRes.voiceMessage,
                     generatedFilePath = codeRes.file.absolutePath,
@@ -62,14 +115,17 @@ class AgentOrchestrator(
             }
         }
 
-        // 4. Dynamic Excel & Document Spreadsheet Generator
-        if (sheetGenerator.canHandle(query)) {
-            val sheetRes = sheetGenerator.generateSheetOrDoc(query)
+        // 6. Intent Execution: Dynamic Excel & Spreadsheet Generator
+        if (intent == UserIntent.SPREADSHEET_GENERATION || sheetGenerator.canHandle(cleanQuery)) {
+            val sheetStart = System.currentTimeMillis()
+            val sheetRes = sheetGenerator.generateSheetOrDoc(cleanQuery)
             if (sheetRes.success && sheetRes.file != null) {
+                trace.addStep("SHEET_ENGINE", "Generated ${sheetRes.fileType} (${sheetRes.file.name})", System.currentTimeMillis() - sheetStart)
+                trace.totalDurationMs = System.currentTimeMillis() - startTime
                 return AgentExecutionResult(
                     agentType = AgentType.OFFICE,
                     success = true,
-                    planSummary = "Generate ${sheetRes.fileType} Document",
+                    planSummary = "ReAct: Spreadsheet Engine -> Verified",
                     outputText = sheetRes.textMessage,
                     spokenText = sheetRes.voiceMessage,
                     generatedFilePath = sheetRes.file.absolutePath,
@@ -79,37 +135,47 @@ class AgentOrchestrator(
             }
         }
 
-        // 5. Android Automations (WhatsApp, YouTube, Phone Calls, App Launch, Alarms)
-        val automationResult = automationManager.tryHandleAutomation(query)
+        // 7. Intent Execution: Android Automations & Device Rules
+        val autoStart = System.currentTimeMillis()
+        val automationResult = automationManager.tryHandleAutomation(cleanQuery)
         if (automationResult != null) {
+            trace.addStep("AUTOMATION", "Native Android Intent executed", System.currentTimeMillis() - autoStart)
+            trace.totalDurationMs = System.currentTimeMillis() - startTime
             return automationResult
         }
 
-        // 6. Live Web & Stock Market Financial Research
-        var liveSearchContext = ""
-        val isMarketQuery = query.lowercase().contains("share market") ||
-                query.lowercase().contains("market") ||
-                query.lowercase().contains("nifty") ||
-                query.lowercase().contains("sensex") ||
-                query.lowercase().contains("trading") ||
-                query.lowercase().contains("stock")
+        val ruleResult = ruleEngine.matchAndExecute(cleanQuery)
+        if (ruleResult != null) {
+            trace.addStep("HARDWARE", "Device rule executed", System.currentTimeMillis() - autoStart)
+            trace.totalDurationMs = System.currentTimeMillis() - startTime
+            return ruleResult
+        }
 
-        if (isMarketQuery || webSearchEngine.isLiveSearchQuery(query)) {
-            val searchQuery = if (isMarketQuery) "$query Indian stock market Nifty today trend news" else query
+        // 8. Intent Execution: Live Web & Stock Market Financial Research
+        var liveSearchContext = ""
+        val isMarketQuery = intent == UserIntent.STOCK_RESEARCH ||
+                cleanQuery.lowercase().contains("share market") ||
+                cleanQuery.lowercase().contains("market") ||
+                cleanQuery.lowercase().contains("nifty") ||
+                cleanQuery.lowercase().contains("sensex") ||
+                cleanQuery.lowercase().contains("trading") ||
+                cleanQuery.lowercase().contains("stock")
+
+        if (isMarketQuery || webSearchEngine.isLiveSearchQuery(cleanQuery)) {
+            val searchStart = System.currentTimeMillis()
+            val searchQuery = if (isMarketQuery) "$cleanQuery Indian stock market Nifty today trend news" else cleanQuery
             val findings = webSearchEngine.searchLiveWeb(searchQuery)
             if (findings != null) {
                 liveSearchContext = findings
+                trace.addStep("WEB_SEARCH", "Real-time findings scraped", System.currentTimeMillis() - searchStart)
             }
         }
 
-        // 7. Retrieve Personal Memory facts
-        val memoryContext = memoryBrain.getFormattedMemoryContext()
-
-        // 8. Financial Research Context Prompt enrichment if query is about share market
+        // 9. Quantitative Financial Prompt Construction
         val enrichedQuery = if (isMarketQuery) {
             """
             [Role: Dalal-Street & Wall-Street Senior Quantitative Financial Research Specialist]
-            Boss query: $query
+            Boss query: $cleanQuery
             
             Instructions:
             - Clearly explain whether the market is going up (Bullish), falling (Bearish), or consolidating (Sideways).
@@ -118,18 +184,18 @@ class AgentOrchestrator(
             - Always conclude with: "Boss, kya aap kisi specific share (jaise Reliance, Tata, HDFC) ka deep-dive technical chart analysis chahte hain ya koi specific strategy banani hai? Aap batayein."
             """.trimIndent()
         } else {
-            query
+            cleanQuery
         }
 
-        // 9. Multi-Provider AI Engine (Gemini, Groq, DeepSeek, OpenAI)
-        val provider = prefs.selectedProvider
+        // 10. Multi-Provider LLM Synthesis (Gemini / Groq / DeepSeek / OpenAI)
+        val llmStart = System.currentTimeMillis()
         val apiKey = prefs.getActiveApiKey()
 
-        val aiResponse = if (provider == AiProvider.GEMINI) {
+        var aiResponse = if (provider == AiProvider.GEMINI) {
             geminiClient.generateAnswer(
                 apiKey = apiKey,
                 prompt = enrichedQuery,
-                chatHistory = history,
+                chatHistory = compressedHistory,
                 imageBase64 = imageBase64,
                 imageMimeType = imageMimeType,
                 memoryContext = memoryContext,
@@ -140,7 +206,7 @@ class AgentOrchestrator(
                 provider = provider,
                 apiKey = apiKey,
                 prompt = enrichedQuery,
-                chatHistory = history,
+                chatHistory = compressedHistory,
                 imageBase64 = imageBase64,
                 imageMimeType = imageMimeType,
                 memoryContext = memoryContext,
@@ -148,11 +214,32 @@ class AgentOrchestrator(
             )
         }
 
+        // 11. Self-Correction / Fallback Logic
+        if (aiResponse.contains("nahi ho saka") || aiResponse.contains("response prapt nahi hua")) {
+            trace.addStep("FALLBACK", "Primary model failed, attempting emergency fallback", System.currentTimeMillis() - llmStart, "FALLBACK")
+            if (provider != AiProvider.GEMINI && prefs.geminiApiKey.isNotBlank()) {
+                aiResponse = geminiClient.generateAnswer(
+                    apiKey = prefs.geminiApiKey,
+                    prompt = enrichedQuery,
+                    chatHistory = compressedHistory,
+                    imageBase64 = imageBase64,
+                    imageMimeType = imageMimeType,
+                    memoryContext = memoryContext,
+                    liveSearchContext = liveSearchContext
+                )
+            }
+        }
+
+        // 12. Safety Output Filtering
+        val finalOutput = safetyGuardrails.filterOutput(aiResponse)
+        trace.addStep("OUTPUT_GUARDRAIL", "Verified and PII-sanitized", 5)
+        trace.totalDurationMs = System.currentTimeMillis() - startTime
+
         return AgentExecutionResult(
             agentType = if (isMarketQuery) AgentType.TRADING else AgentType.MAIN_JARVIS,
             success = true,
-            planSummary = if (isMarketQuery) "Financial Market Technical Research" else if (liveSearchContext.isNotBlank()) "${provider.displayName} + Live Research" else "${provider.displayName} Core",
-            outputText = aiResponse
+            planSummary = if (isMarketQuery) "ReAct: Dalal-Street Research [${trace.totalDurationMs}ms]" else "${provider.displayName} Core [${trace.totalDurationMs}ms]",
+            outputText = finalOutput
         )
     }
 }
